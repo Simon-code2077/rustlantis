@@ -1,7 +1,12 @@
 # User Guide for Rustlantis
 Every changes are made under : https://github.com/Simon-code2077/rustlantis/tree/dev
 For a general Fuzz test, run:
+
 ```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup install nightly
+rustup default nightly
+cargo install grcov
 ./fuzz.sh
 ```
 For a coverage test, run:
