@@ -1,3 +1,29 @@
+# User Guide for Rustlantis
+Every changes are made under : https://github.com/Simon-code2077/rustlantis/tree/dev
+For a general Fuzz test, run:
+```
+./fuzz.sh
+```
+For a coverage test, run:
+```
+# install a customized rustc compiler
+git clone --depth 1 https://github.com/rust-lang/rust rust-nightly
+cd rust-nightly && echo "build.profiler = true" > config.toml
+cd /path/to/rust-nightly/src/bootstrap
+grep -Irnsw "rust_new_symbol_mangling"
+# Usually in file src/bootstrap/src/core/builder/cargo.rs, Find the function "fn cargo", add the following assignments (apply coverage flags to all modules except std):
+if mode != Mode::Std {
+    rustflags.arg("-Cinstrument-coverage");
+} 
+# Change the defaults install location under src/bootstrap/src/core/build_steps/install.rs for access permission
+let prefix = default_path(&builder.config.prefix, "path/to/install");
+let sysconfdir = prefix.join(default_path(&builder.config.sysconfdir, "path/to/etc"));
+# Build the rustc bins
+./x build && ./x install
+# Run the coverage measurement
+./cov.sh
+```
+
 # Rustlantis
 A Rust Mid-level Intermediate Representation fuzzer
 

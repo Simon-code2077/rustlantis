@@ -2,26 +2,24 @@
 #!/bin/bash
 set -e
 
-RUSTC=/users/hangye/compiler/rustc_cov/bin/rustc
-# RUSTC=rustc
-# RUSTC=/users/hangye/compiler/rust-nightly/build/x86_64-unknown-linux-gnu/stage2/bin/rustc
+RUSTC=/path/to/install/rustc
 SRC_DIR=out
 COV_DIR=coverage
 rm -rf "$COV_DIR"
 rm -rf cov.info
 mkdir -p "$COV_DIR"
 
-# for file in "$SRC_DIR"/*.rs; do
-#     name=$(basename "$file" .rs)
-#     echo "Compiling $file ..."
-#     LLVM_PROFILE_FILE="$COV_DIR/${name}-%p-%m.profraw" \
-#         "$RUSTC" "$file" --emit=llvm-bc -o "$SRC_DIR/${name}.bc"
-# done
+for file in "$SRC_DIR"/*.rs; do
+    name=$(basename "$file" .rs)
+    echo "Compiling $file ..."
+    LLVM_PROFILE_FILE="$COV_DIR/${name}-%p-%m.profraw" \
+        "$RUSTC" "$file" --emit=llvm-bc -o "$SRC_DIR/${name}.bc"
+done
 
 # Compile multiple test files to get broader coverage
-echo "Compiling test.rs..."
-LLVM_PROFILE_FILE="$COV_DIR/100-%p-%m.profraw" \
-    "$RUSTC" out/100.mir --emit=llvm-bc -o "100.bc" 
+# echo "Compiling test.rs..."
+# LLVM_PROFILE_FILE="$COV_DIR/100-%p-%m.profraw" \
+#     "$RUSTC" out/100.mir --emit=llvm-bc -o "100.bc" 
 
 # echo "Compiling complex_test.rs..."
 # LLVM_PROFILE_FILE="$COV_DIR/complex-%p-%m.profraw" \
@@ -34,9 +32,9 @@ LLVM_PROFILE_FILE="$COV_DIR/100-%p-%m.profraw" \
 
 echo "Processing coverage data..."
 grcov coverage/*.profraw   \
-    -s /users/hangye/compiler/rust-nightly/   \
-    -b /users/hangye/compiler/rustc_cov/bin   \
-    --llvm-path /users/hangye/compiler/rust-nightly/build/x86_64-unknown-linux-gnu/ci-llvm/bin   \
+    -s path/to/source/rust-nightly   \
+    -b path/to/install   \
+    --llvm-path path/to/source/rust-nightly/build/x86_64-unknown-linux-gnu/ci-llvm/bin   \
     --keep-only="compiler/rustc_mi*" \
     -t lcov   -o cov.info
 lcov --summary cov.info
