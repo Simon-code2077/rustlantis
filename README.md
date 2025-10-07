@@ -1,6 +1,8 @@
 ## Personal Notes
 We support all primitive integer and floating point types, bool, char, arrays, tuples, raw pointers, shared and mutable references, structs, and enums. This indicates the all types in MIR.
+
 For a future extension of Rustlantis it could be interesting to consider generating generic code.
+
 It is possible to uphold this validity constraint using the known value information, but we have not yet implemented this fine-grained filtering. For now, we simply prevent transmutations to bool and char types.
 
 

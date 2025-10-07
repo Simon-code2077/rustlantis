@@ -7,6 +7,7 @@ use std::{cmp, fmt, vec};
 use index_vec::IndexVec;
 use log::{debug, trace};
 use mir::serialize::Serialize;
+// maybe should open source file for ref
 use mir::syntax::{
     AggregateKind, BasicBlock, BasicBlockData, BinOp, Body, Callee, Function, IntTy, Literal,
     Local, LocalDecls, Mutability, Operand, Place, Program, ProjectionElem, Rvalue, Statement,
@@ -130,6 +131,7 @@ impl GenerationCtx {
     - Type matches with lhs
     - LHS and RHS do not alias
      */
+    // Generate a use of an operand. 直接使用 rvalue = operand
     fn generate_use(&self, lhs: &Place) -> Result<Rvalue> {
         trace!(
             "generating use with {}: {}",
@@ -139,7 +141,7 @@ impl GenerationCtx {
         let operand = self.choose_operand(&[lhs.ty(self.current_decls(), &self.tcx)], lhs)?;
         Ok(Rvalue::Use(operand))
     }
-
+    /// Generate a unary operation. 一元运算 rvalue = unop operand
     fn generate_unary_op(&self, lhs: &Place) -> Result<Rvalue> {
         use TyKind::*;
         use UnOp::*;
@@ -156,7 +158,7 @@ impl GenerationCtx {
         })?;
         Ok(rvalue)
     }
-
+    /// Generate a binary operation. 二元运算 rvalue = binop loperand roperand
     fn generate_binary_op(&self, lhs: &Place) -> Result<Rvalue> {
         use BinOp::*;
         use TyKind::*;
@@ -265,7 +267,7 @@ impl GenerationCtx {
         })?;
         Ok(rvalue)
     }
-
+    // Generate a checked bin op, 溢出二元运算 rvalue = checked_binop loperand roperand，返回值是元组，第一个是结果，第二个是bool
     fn generate_checked_binary_op(&self, lhs: &Place) -> Result<Rvalue> {
         use BinOp::*;
         use TyKind::*;
@@ -295,7 +297,7 @@ impl GenerationCtx {
             Err(SelectionError::Exhausted)
         }
     }
-
+    // Type cast 类型转化
     fn generate_cast(&self, lhs: &Place) -> Result<Rvalue> {
         let target_ty = lhs.ty(self.current_decls(), &self.tcx);
         let source_tys = match target_ty.kind(&self.tcx) {
@@ -346,7 +348,7 @@ impl GenerationCtx {
         )?;
         Ok(rvalue)
     }
-
+    // mutable and immutable pointer
     fn generate_address_of(&self, lhs: &Place) -> Result<Rvalue> {
         let target_ty = lhs.ty(self.current_decls(), &self.tcx);
         let (source_ty, mutability) = match target_ty.kind(&self.tcx) {
@@ -362,7 +364,7 @@ impl GenerationCtx {
             Ok(Rvalue::AddressOf(*mutability, ppath.to_place(&self.pt)))
         })
     }
-
+    // mutable and immutable reference
     fn generate_ref(&self, lhs: &Place) -> Result<Rvalue> {
         let target_ty = lhs.ty(self.current_decls(), &self.tcx);
         let (source_ty, mutability) = match target_ty.kind(&self.tcx) {
@@ -383,7 +385,7 @@ impl GenerationCtx {
             Ok(Rvalue::Ref(*mutability, ppath.to_place(&self.pt)))
         })
     }
-
+    // create an aggregate value, like tuple, array, struct, enum
     fn generate_aggregate(&self, lhs: &Place) -> Result<Rvalue> {
         let target_ty = lhs.ty(self.current_decls(), &self.tcx);
         let agg = match target_ty.kind(&self.tcx) {
@@ -433,7 +435,7 @@ impl GenerationCtx {
     // fn generate_discriminant(&self, cur_stmt: &mut Statement) -> Result<()> {
     //     todo!()
     // }
-
+    // Generate the Rvalue based on Weight. 根据weight权重选择rvalue生成方法
     fn generate_rvalue(&self, lhs: &Place) -> Result<Rvalue> {
         let choices_and_weights: Vec<(fn(&GenerationCtx, &Place) -> Result<Rvalue>, usize)> = vec![
             (Self::generate_use, 1),
