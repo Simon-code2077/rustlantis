@@ -463,6 +463,7 @@ impl GenerationCtx {
 
 // Statement
 impl GenerationCtx {
+    // 使用老变量
     fn generate_assign(&self) -> Result<Statement> {
         let (lhs_choices, weights) = PlaceSelector::for_lhs(self.tcx.clone())
             .into_weighted(&self.pt)
@@ -480,7 +481,7 @@ impl GenerationCtx {
             Ok(statement)
         })
     }
-
+    // 申明新变量
     // Hack to take &self
     fn generate_new_var(&self) -> Result<Statement> {
         Ok(Statement::Nop)
@@ -927,6 +928,7 @@ impl GenerationCtx {
     /// Terminates the current BB, and moves the generation context to the new BB
     fn choose_terminator(&mut self) -> bool {
         assert!(matches!(self.current_bb().terminator(), Terminator::Hole));
+        // 大于10层强制返回
         if self.pt.can_return() {
             if Place::RETURN_SLOT.complexity(&self.pt) > 10
                 || self.current_fn().basic_blocks.len() >= MAX_BB_COUNT
@@ -940,7 +942,7 @@ impl GenerationCtx {
             (Self::generate_switch_int_params, 20),
             (Self::generate_intrinsic_call_params, 20),
             (
-                Self::generate_call_params,
+                Self::generate_call_params,     // only call for offset ptr or transmute
                 MAX_FN_COUNT.saturating_sub(self.program.functions.len()),
             ),
         ];
@@ -1038,6 +1040,7 @@ impl GenerationCtx {
     // save_ctx should be called before generating a Call terminator. If the
     // target function ended up being too long, we give up and restore context
     // to try generate another Call terminator
+    // 在生成函数调用前保存状态，如果被调用函数生成失败，可以回滚
     fn save_ctx(&mut self) {
         self.saved_ctx.push(SavedCtx {
             program: self.program.clone(),
@@ -1050,6 +1053,7 @@ impl GenerationCtx {
     // restore_ctx is called when the current function is too long.
     // We restore context to before the Call terminator is added,
     // and try to generate something else
+    // 当函数生成过长或失败时，回滚到调用前的状态
     fn restore_ctx(&mut self) {
         let saved = self
             .saved_ctx
@@ -1062,6 +1066,7 @@ impl GenerationCtx {
     }
 
     // Move generation context to an executed function
+    // enter_new_fn - 进入新函数 更新cursor和pt ，记录return信息
     fn enter_new_fn(&mut self, args: &[Operand], return_dest: &Place, public: bool) -> Function {
         let args_ty: Vec<TyId> = args
             .iter()
@@ -1092,7 +1097,7 @@ impl GenerationCtx {
         );
         new_fn
     }
-
+    // enter_fn0 - 进入主函数 更新cursor和pt
     fn enter_fn0(&mut self, args_ty: &[TyId], return_ty: TyId, args: &[Literal]) {
         self.program.set_entry_args(args);
         let mut body = Body::new(args_ty, return_ty, true);
@@ -1133,8 +1138,9 @@ impl GenerationCtx {
         }
     }
 }
-
+// utils
 impl GenerationCtx {
+    // 加权选择函数
     pub fn make_choice_weighted<T, F, R>(
         &self,
         choices: impl Iterator<Item = T> + Clone,
@@ -1160,7 +1166,7 @@ impl GenerationCtx {
             }
         }
     }
-
+    // 普通随机选择函数
     fn make_choice<T, F, R>(
         &self,
         choices: impl Iterator<Item = T> + Clone,
@@ -1187,7 +1193,7 @@ impl GenerationCtx {
             }
         }
     }
-
+    // GenerationCtx的new 函数， 生成上下文
     pub fn new(seed: u64, debug_dump: bool) -> Self {
         let rng = RefCell::new(Box::new(rand::rngs::SmallRng::seed_from_u64(seed)));
         let tcx = Rc::new(seed_tys(&mut *rng.borrow_mut()));
@@ -1237,7 +1243,7 @@ impl GenerationCtx {
     pub fn current_decls(&self) -> &LocalDecls {
         &self.current_fn().local_decls
     }
-
+    // generate_fn0 - 生成入口函数
     fn generate_fn0(&mut self) {
         self.save_ctx();
         let args_count = self.rng.get_mut().gen_range(0..=MAX_ARGS_COUNT);
@@ -1267,7 +1273,7 @@ impl GenerationCtx {
         };
         self.enter_fn0(&arg_tys, return_ty, &arg_literals);
     }
-
+    // generate - 生成整个程序
     pub fn generate(mut self) -> (Program, TyCtxt) {
         self.generate_fn0();
 
@@ -1281,6 +1287,7 @@ impl GenerationCtx {
             if !self.choose_terminator() {
                 break;
             }
+            // If the current function is too long, restore context and try again
             if self.current_fn().basic_blocks.len() >= MAX_BB_COUNT_HARD {
                 debug!(
                     "{} -> {} is too long, retrying",
@@ -1304,7 +1311,7 @@ impl GenerationCtx {
 
         (self.program, Rc::into_inner(self.tcx).unwrap())
     }
-
+    // 更新状态图
     fn post_generation(&mut self, stmt: &Statement) {
         // We must evaluate the places first before updating any PlaceGraph state,
         // as the updates may affect projections
@@ -1320,14 +1327,14 @@ impl GenerationCtx {
                         Rvalue::AddressOf(_, referent) | Rvalue::Ref(_, referent) => {
                             let referent = referent.to_place_index(&self.pt).unwrap();
                             actions.push(Box::new(move |pt| {
-                                pt.set_ref(lhs, referent, None);
+                                pt.set_ref(lhs, referent, None); // 建立ref关系
                             }));
                         }
                         _ => {
                             let new_df = rvalue.complexity(&self.pt);
                             actions.push(Box::new(move |pt| {
                                 pt.update_complexity(lhs, new_df);
-                            }));
+                            }));    // 更新复杂度
                         }
                     }
                 }
@@ -1344,12 +1351,12 @@ impl GenerationCtx {
                 }
                 Statement::Deinit(place) => {
                     let place = place.to_place_index(&self.pt).unwrap();
-                    actions.push(Box::new(move |pt| pt.mark_place_uninit(place)));
+                    actions.push(Box::new(move |pt| pt.mark_place_uninit(place)));  // 标记为未初始化
                 }
                 Statement::SetDiscriminant(place, discr) => {
                     let place = place.to_place_index(&self.pt).unwrap();
                     actions.push(Box::new(move |pt| {
-                        pt.assign_discriminant(place, Some(VariantIdx::new(*discr as usize)))
+                        pt.assign_discriminant(place, Some(VariantIdx::new(*discr as usize)))  // 设置枚举的变体
                     }));
                 }
                 Statement::Nop => {}
@@ -1450,7 +1457,7 @@ impl GenerationCtx {
             action(&mut self.pt);
         }
     }
-
+    // 投影
     fn aggregate_places<'a>(
         &self,
         root: PlaceIndex,
@@ -1485,3 +1492,4 @@ impl GenerationCtx {
             .collect()
     }
 }
+// 没有明白对于place的遍历和检索在哪里
