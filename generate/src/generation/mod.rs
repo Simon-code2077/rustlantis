@@ -21,6 +21,7 @@ use crate::literal::GenLiteral;
 use crate::pgraph::{HasComplexity, PlaceGraph, PlaceIndex, PlaceOperand, ToPlaceIndex};
 use crate::place_select::{PlaceSelector, Weight};
 use crate::ty::{seed_tys, TySelect};
+use crate::llm_optimizer::LLMConfig;
 
 use self::intrinsics::{ArithOffset, Transmute};
 use crate::generation::intrinsics::CoreIntrinsic;
@@ -80,13 +81,14 @@ pub struct GenerationCtx {
     return_stack: Vec<Cursor>,
     saved_ctx: Vec<SavedCtx>,
     cursor: Cursor,
+    llm_config: LLMConfig,
 }
 
 // Operand
 impl GenerationCtx {
     fn choose_operand(&self, tys: &[TyId], excluded: &Place) -> Result<Operand> {
         let operand: Result<Operand> = try {
-            let (ppath, weights) = PlaceSelector::for_operand(self.tcx.clone())
+            let (ppath, weights) = self.place_selector_with_llm()
                 .except(excluded)
                 .of_tys(tys)
                 .into_weighted(&self.pt)
@@ -463,6 +465,7 @@ impl GenerationCtx {
 impl GenerationCtx {
     fn generate_assign(&self) -> Result<Statement> {
         let (lhs_choices, weights) = PlaceSelector::for_lhs(self.tcx.clone())
+            .with_llm_config(self.llm_config.clone())
             .into_weighted(&self.pt)
             .ok_or(SelectionError::Exhausted)?;
 
@@ -1133,6 +1136,12 @@ impl GenerationCtx {
 }
 
 impl GenerationCtx {
+    // Helper method to create PlaceSelector with LLM config
+    fn place_selector_with_llm(&self) -> PlaceSelector {
+        PlaceSelector::for_operand(self.tcx.clone())
+            .with_llm_config(self.llm_config.clone())
+    }
+
     pub fn make_choice_weighted<T, F, R>(
         &self,
         choices: impl Iterator<Item = T> + Clone,
@@ -1203,7 +1212,17 @@ impl GenerationCtx {
                 basic_block: BasicBlock::new(0),
             },
             saved_ctx: vec![],
+            llm_config: LLMConfig::default(),
         }
+    }
+
+    pub fn with_llm_config(mut self, config: LLMConfig) -> Self {
+        self.llm_config = config;
+        self
+    }
+
+    pub fn set_llm_config(&mut self, config: LLMConfig) {
+        self.llm_config = config;
     }
 
     fn add_new_bb(&mut self) -> BasicBlock {

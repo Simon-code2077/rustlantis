@@ -1,0 +1,135 @@
+# Rustlantis LLM优化配置示例
+# 这个文件展示了如何配置大语言模型优化权重选择
+
+# =====================================
+# 基本配置
+# =====================================
+
+# 是否启用LLM优化
+llm_enabled = true
+
+# LLM API端点
+# 本地Ollama服务
+llm_endpoint = "http://localhost:11434/v1/chat/completions"
+
+# 或者使用OpenAI API
+# llm_endpoint = "https://api.openai.com/v1/chat/completions"
+
+# API密钥（可选，用于需要认证的服务）
+# llm_api_key = "your-api-key-here"
+
+# 模型名称
+llm_model = "llama2"
+
+# 优化频率：每N次选择优化一次权重
+optimization_frequency = 10
+
+# =====================================
+# 高级配置
+# =====================================
+
+# 缓存大小限制
+cache_size_limit = 1000
+
+# 请求超时时间（秒）
+request_timeout = 30
+
+# 重试次数
+max_retries = 3
+
+# =====================================
+# 优化策略配置
+# =====================================
+
+# 不同使用类型的权重偏好
+[weight_preferences]
+
+[weight_preferences.operand]
+# 操作数选择的权重偏好
+complexity_sweet_spot = [5, 15]  # 偏好的复杂度范围
+known_val_boost = 1.5            # 已知值的权重倍数
+deref_boost = 2.0               # 解引用操作的权重倍数
+
+[weight_preferences.lhs]
+# 左值选择的权重偏好  
+uninit_boost = 3.0              # 未初始化变量的权重倍数
+return_proj_boost = 2.0         # 返回投影的权重倍数
+
+[weight_preferences.argument]
+# 参数选择的权重偏好
+literal_boost = 2.0             # 字面量的权重倍数
+ref_boost = 20.0               # 引用类型的权重倍数
+ptr_boost = 20.0               # 原始指针的权重倍数
+
+[weight_preferences.return]
+# 返回值选择的权重偏好
+avoid_refs = true              # 避免返回引用类型
+diversity_boost = 1.5          # 多样性类型的权重倍数
+
+# =====================================
+# 提示词模板自定义
+# =====================================
+
+[prompt_customization]
+# 是否使用自定义提示词
+use_custom_prompts = false
+
+# 系统提示词文件路径（如果使用自定义）
+system_prompt_file = "custom_system_prompt.txt"
+
+# 用户提示词模板文件路径
+user_prompt_template_file = "custom_user_prompt_template.txt"
+
+# =====================================
+# 调试和监控
+# =====================================
+
+[debugging]
+# 是否启用详细日志
+verbose_logging = true
+
+# 是否保存优化决策历史
+save_optimization_history = true
+
+# 历史文件路径
+history_file = "optimization_history.json"
+
+# 是否在控制台显示LLM推理过程
+show_reasoning = true
+
+# =====================================
+# 性能调优
+# =====================================
+
+[performance]
+# 并发请求数限制
+max_concurrent_requests = 3
+
+# 批处理大小
+batch_size = 5
+
+# 缓存策略："memory" | "disk" | "hybrid"
+cache_strategy = "memory"
+
+# 磁盘缓存路径（如果使用磁盘缓存）
+disk_cache_path = "/tmp/rustlantis_llm_cache"
+
+# =====================================
+# 实验性功能
+# =====================================
+
+[experimental]
+# 是否启用自适应优化频率
+adaptive_frequency = false
+
+# 是否使用多模型集成
+use_model_ensemble = false
+
+# 集成模型列表
+ensemble_models = ["llama2", "codellama", "mistral"]
+
+# 是否启用在线学习
+online_learning = false
+
+# 学习率
+learning_rate = 0.01

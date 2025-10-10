@@ -1,4 +1,4 @@
-use std::{rc::Rc, vec};
+use std::{rc::Rc, vec, cell::RefCell};
 
 use abi::size::Size;
 use mir::{
@@ -8,6 +8,7 @@ use mir::{
 use rand_distr::WeightedIndex;
 
 use crate::{
+    llm_optimizer::{LLMOptimizer, LLMConfig, WeightOptimizationRequest, PlaceFeature, ContextInfo},
     mem::BasicMemory,
     pgraph::{PlaceGraph, PlaceIndex, PlacePath, ToPlaceIndex},
 };
@@ -35,6 +36,9 @@ pub struct PlaceSelector {
     allow_uninit: bool,
     usage: PlaceUsage,
     tcx: Rc<TyCtxt>,
+    llm_optimizer: Option<Rc<RefCell<LLMOptimizer>>>,
+    llm_config: LLMConfig,
+    optimization_counter: usize,
 }
 
 pub type Weight = usize;
@@ -67,7 +71,29 @@ impl PlaceSelector {
             tcx,
             moved: vec![],
             refed: vec![],
+            llm_optimizer: None,
+            llm_config: LLMConfig::default(),
+            optimization_counter: 0,
         }
+    }
+
+    pub fn with_llm_config(mut self, config: LLMConfig) -> Self {
+        println!("DEBUG: PlaceSelector.with_llm_config called, enabled={}", config.enabled);
+        if config.enabled {
+            println!("DEBUG: 创建LLM优化器，端点: {}", config.api_endpoint);
+            self.llm_optimizer = Some(Rc::new(RefCell::new(LLMOptimizer::new(
+                config.api_endpoint.clone(),
+                config.api_key.clone(),
+            ))));
+            println!("DEBUG: LLM优化器创建成功");
+        }
+        self.llm_config = config;
+        self
+    }
+
+    pub fn enable_llm_optimization(&mut self, api_endpoint: String, api_key: Option<String>) {
+        self.llm_optimizer = Some(Rc::new(RefCell::new(LLMOptimizer::new(api_endpoint, api_key))));
+        self.llm_config.enabled = true;
     }
 
     pub fn for_set_discriminant(tcx: Rc<TyCtxt>) -> Self {
@@ -289,7 +315,11 @@ impl PlaceSelector {
     pub fn into_weighted(self, pt: &PlaceGraph) -> Option<(Vec<PlacePath>, WeightedIndex<Weight>)> {
         let usage = self.usage;
         let tcx = self.tcx.clone();
-        let (places, weights): (Vec<PlacePath>, Vec<Weight>) =
+        let should_optimize = self.should_optimize_with_llm();
+        let llm_optimizer = self.llm_optimizer.clone();
+        let _llm_config = self.llm_config.clone();
+        
+        let (places, mut weights): (Vec<PlacePath>, Vec<Weight>) =
             self.into_iter_path(pt)
                 .map(|ppath| {
                     let place = ppath.target_index();
@@ -350,6 +380,22 @@ impl PlaceSelector {
                     (ppath, weight)
                 })
                 .unzip();
+
+        // Apply LLM optimization if enabled and appropriate
+        if should_optimize {
+            println!("DEBUG: 准备调用LLM优化，places数量: {}, usage: {:?}", places.len(), usage);
+            if let Some(optimized_weights) = Self::optimize_weights_with_llm_static(
+                &places, &weights, pt, llm_optimizer, &usage
+            ) {
+                println!("DEBUG: LLM优化成功，应用新权重");
+                weights = optimized_weights;
+            } else {
+                println!("DEBUG: LLM优化失败，使用原始权重");
+            }
+        } else {
+            println!("DEBUG: 跳过LLM优化");
+        }
+
         if let Ok(weighted_index) = WeightedIndex::new(weights) {
             Some((places, weighted_index))
         } else {
@@ -357,10 +403,116 @@ impl PlaceSelector {
         }
     }
 
+    fn should_optimize_with_llm(&self) -> bool {
+        let should_optimize = self.llm_config.enabled && self.llm_optimizer.is_some();
+        println!("DEBUG: should_optimize_with_llm = {}, enabled={}, optimizer_exists={}", 
+                should_optimize, self.llm_config.enabled, self.llm_optimizer.is_some());
+        should_optimize
+    }
+
+    fn optimize_weights_with_llm_static(
+        places: &[PlacePath],
+        current_weights: &[Weight],
+        pt: &PlaceGraph,
+        llm_optimizer: Option<Rc<RefCell<LLMOptimizer>>>,
+        usage: &PlaceUsage,
+    ) -> Option<Vec<Weight>> {
+        println!("DEBUG: 进入optimize_weights_with_llm_static，places数量: {}", places.len());
+        
+        // 如果没有places，直接返回
+        if places.is_empty() {
+            println!("DEBUG: places为空，直接返回");
+            return None;
+        }
+        
+        let optimizer = llm_optimizer?;
+        println!("DEBUG: LLM优化器存在");
+        
+        // 限制优化的place数量，避免API调用过大
+        if places.len() > 50 {
+            println!("DEBUG: places数量超过50，跳过优化");
+            return None;
+        }
+        
+        println!("DEBUG: 开始构建PlaceFeature");
+        let place_features: Vec<PlaceFeature> = places
+            .iter()
+            .enumerate()
+            .map(|(i, ppath)| {
+                let index = ppath.target_index();
+                let ty = pt.ty(index);
+                
+                // Create a simplified type info string
+                let type_info = format!("{:?}", ty);
+                
+                // Use available public methods to check type properties
+                let is_ref = type_info.contains("&");
+                let is_raw_ptr = type_info.contains("*");
+                
+                PlaceFeature {
+                    place_id: i,
+                    type_info,
+                    is_ref,
+                    is_raw_ptr,
+                    has_known_val: pt.known_val(index).is_some(),
+                    is_uninit: !pt.is_place_init(index),
+                    complexity: pt.get_complexity(index),
+                    has_deref: ppath.projections(pt).any(|proj| proj.is_deref()),
+                    is_offsetted: false, // 暂时禁用以避免panic
+                    is_roundtripped: false, // 暂时禁用以避免panic
+                    current_weight: current_weights[i],
+                }
+            })
+            .collect();
+
+        println!("DEBUG: 构建PlaceFeature完成，数量: {}", place_features.len());
+
+        let context_info = ContextInfo {
+            current_bb_count: 0, // You'll need to pass this from GenerationCtx
+            current_stmt_count: 0, // You'll need to pass this from GenerationCtx
+            function_depth: 0, // You'll need to pass this from GenerationCtx
+            total_variables: places.len(),
+        };
+
+        let request = WeightOptimizationRequest {
+            usage_type: format!("{:?}", usage),
+            place_features,
+            context_info,
+        };
+
+        println!("DEBUG: 准备调用LLM API，usage_type: {}", request.usage_type);
+
+        match optimizer.borrow_mut().optimize_weights_sync(request) {
+            Ok(response) => {
+                println!("DEBUG: LLM API调用成功，reasoning: {}", response.reasoning);
+                if response.reasoning.contains("Failed to parse LLM response") {
+                    println!("DEBUG: LLM响应解析失败");
+                    None
+                } else {
+                    let mut optimized_weights = current_weights.to_vec();
+                    for opt_weight in response.optimized_weights {
+                        if opt_weight.place_id < optimized_weights.len() {
+                            optimized_weights[opt_weight.place_id] = opt_weight.weight;
+                        }
+                    }
+                    println!("DEBUG: 权重优化完成，返回新权重");
+                    Some(optimized_weights)
+                }
+            }
+            Err(e) => {
+                println!("DEBUG: LLM API调用失败: {:?}", e);
+                None
+            }
+        }
+    }
+
     pub fn into_iter_place(self, pt: &PlaceGraph) -> impl Iterator<Item = Place> + Clone + '_ {
         self.into_iter_path(pt).map(|ppath| ppath.to_place(pt))
     }
 }
+
+#[cfg(test)]
+mod llm_tests;
 
 #[cfg(test)]
 mod tests {
