@@ -2,3 +2,5 @@
 /config.toml
 /coverage
 /out
+*.log
+*.txt
