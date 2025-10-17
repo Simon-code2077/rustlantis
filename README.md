@@ -28,7 +28,7 @@ git clone --depth 1 https://github.com/rust-lang/rust rust-nightly
 cd rust-nightly && echo "build.profiler = true" > config.toml
 cd /path/to/rust-nightly/src/bootstrap
 grep -Irnsw "rust_new_symbol_mangling"
-# Usually in file src/bootstrap/src/core/builder/cargo.rs, Find the function "fn cargo", add the following assignments (apply coverage flags to all modules except std):
+# Usually in file src/bootstrap/src/core/builder/cargo.rs, it belongs to function "fn cargo". Find the function, add the following assignments somewhere nearby (apply coverage flags to all modules except std):
 if mode != Mode::Std {
     rustflags.arg("-Cinstrument-coverage");
 } 
@@ -36,7 +36,9 @@ if mode != Mode::Std {
 let prefix = default_path(&builder.config.prefix, "path/to/install");
 let sysconfdir = prefix.join(default_path(&builder.config.sysconfdir, "path/to/etc"));
 # Build the rustc bins
+cd path/to/rust-nightly
 ./x build && ./x install
+# It usually takes 1 hour and 50GB storage to install
 # Run the coverage measurement
 # Don't forget to change the path in bash script to your own path
 ./cov.sh
