@@ -8,5 +8,4 @@ members = [
     "generate",
     "rangemap",
     "abi",
-    "rustlego",
 ]
