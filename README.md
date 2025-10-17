@@ -38,6 +38,7 @@ let sysconfdir = prefix.join(default_path(&builder.config.sysconfdir, "path/to/e
 # Build the rustc bins
 ./x build && ./x install
 # Run the coverage measurement
+# Don't forget to change the path in bash script to your own path
 ./cov.sh
 ```
 
