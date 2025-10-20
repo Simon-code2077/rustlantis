@@ -1,5 +1,4 @@
 use crate::composer::combiner::{ComposedProgram, FunctionCombiner};
-use crate::difftest::runner::{DiffTestRunner, DiffTestConfig, DiffTestReport};
 use crate::llm::function_generator::{FunctionGenerator, GeneratedFunction};
 use crate::templates::TemplateLibrary;
 use anyhow::Result;
@@ -9,7 +8,6 @@ use tokio::fs;
 pub struct FuzzingPipeline {
     function_generator: FunctionGenerator,
     function_combiner: FunctionCombiner,
-    difftest_runner: DiffTestRunner,
     template_library: TemplateLibrary,
 }
 
@@ -20,7 +18,6 @@ pub struct FuzzingConfig {
     pub categories: Vec<String>,
     pub max_function_complexity: u32,
     pub output_dir: PathBuf,
-    pub difftest_config: DiffTestConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -28,16 +25,14 @@ pub struct FuzzingSession {
     pub config: FuzzingConfig,
     pub generated_functions: Vec<GeneratedFunction>,
     pub composed_programs: Vec<ComposedProgram>,
-    pub test_reports: Vec<DiffTestReport>,
-    pub bugs_found: usize,
+    pub output_files: Vec<PathBuf>,
 }
 
 impl FuzzingPipeline {
-    pub fn new(difftest_config: DiffTestConfig) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         Ok(Self {
             function_generator: FunctionGenerator::new()?,
             function_combiner: FunctionCombiner::new(),
-            difftest_runner: DiffTestRunner::new(difftest_config),
             template_library: TemplateLibrary::new(),
         })
     }
@@ -55,7 +50,6 @@ impl FuzzingPipeline {
             ],
             max_function_complexity: 5,
             output_dir: PathBuf::from("fuzzing_output"),
-            difftest_config: DiffTestRunner::default_config(),
         }
     }
 
@@ -72,8 +66,8 @@ impl FuzzingPipeline {
             config: config.clone(),
             generated_functions: Vec::new(),
             composed_programs: Vec::new(),
-            test_reports: Vec::new(),
-            bugs_found: 0,
+            output_files: Vec::new(),
+
         };
 
         // Phase 1: Generate functions
@@ -130,25 +124,25 @@ impl FuzzingPipeline {
             fs::write(&program_file, &program.code).await?;
         }
 
-        // Phase 3: Differential testing
-        println!("\n=== Phase 3: Differential Testing ===");
-        let test_reports = self.difftest_runner
-            .run_batch_tests(&session.composed_programs)
-            .await?;
-
-        // Count bugs found
-        let bugs_found = test_reports
-            .iter()
-            .map(|report| report.discrepancies.len())
-            .sum();
-
-        session.test_reports = test_reports;
-        session.bugs_found = bugs_found;
+        // Phase 3: Save programs to files for testing
+        println!("\n=== Phase 3: Saving Programs ===");
+        let programs_dir = config.output_dir.join("programs");
+        fs::create_dir_all(&programs_dir).await?;
+        
+        for (i, program) in session.composed_programs.iter().enumerate() {
+            let filename = format!("{:03}_{}.rs", i + 1, program.name);
+            let filepath = programs_dir.join(&filename);
+            fs::write(&filepath, &program.code).await?;
+            session.output_files.push(filepath.clone());
+            println!("  Saved: {}", filepath.display());
+        }
 
         println!("\n=== Fuzzing Session Complete ===");
         println!("  Functions generated: {}", session.generated_functions.len());
         println!("  Programs composed: {}", session.composed_programs.len());
-        println!("  Bugs found: {}", session.bugs_found);
+        println!("  Files saved: {}", session.output_files.len());
+        println!("\nTo test with Rustlantis difftest:");
+        println!("  cargo run -p difftest -- <program_file.rs>");
 
         // Save session summary
         let summary_file = config.output_dir.join("session_summary.json");
@@ -173,7 +167,7 @@ impl FuzzingPipeline {
             
             match self.run_fuzzing_session(iteration_config).await {
                 Ok(session) => {
-                    println!("✅ Iteration {} completed - {} bugs found", i + 1, session.bugs_found);
+                    println!("✅ Iteration {} completed - {} files generated", i + 1, session.output_files.len());
                     sessions.push(session);
                 }
                 Err(e) => {
@@ -183,7 +177,7 @@ impl FuzzingPipeline {
         }
         
         // Generate overall statistics
-        let total_bugs = sessions.iter().map(|s| s.bugs_found).sum::<usize>();
+        let total_files = sessions.iter().map(|s| s.output_files.len()).sum::<usize>();
         let total_programs = sessions.iter().map(|s| s.composed_programs.len()).sum::<usize>();
         let total_functions = sessions.iter().map(|s| s.generated_functions.len()).sum::<usize>();
         
@@ -191,12 +185,7 @@ impl FuzzingPipeline {
         println!("  Iterations completed: {}", sessions.len());
         println!("  Total functions generated: {}", total_functions);
         println!("  Total programs composed: {}", total_programs);
-        println!("  Total bugs found: {}", total_bugs);
-        
-        if !sessions.is_empty() {
-            let avg_bugs_per_iteration = total_bugs as f64 / sessions.len() as f64;
-            println!("  Average bugs per iteration: {:.2}", avg_bugs_per_iteration);
-        }
+        println!("  Total files generated: {}", total_files);
         
         Ok(sessions)
     }
@@ -238,11 +227,10 @@ impl serde::Serialize for FuzzingSession {
     {
         use serde::ser::SerializeStruct;
         
-        let mut state = serializer.serialize_struct("FuzzingSession", 4)?;
+        let mut state = serializer.serialize_struct("FuzzingSession", 3)?;
         state.serialize_field("functions_generated", &self.generated_functions.len())?;
         state.serialize_field("programs_composed", &self.composed_programs.len())?;
-        state.serialize_field("bugs_found", &self.bugs_found)?;
-        state.serialize_field("test_reports_count", &self.test_reports.len())?;
+        state.serialize_field("output_files_count", &self.output_files.len())?;
         state.end()
     }
 }

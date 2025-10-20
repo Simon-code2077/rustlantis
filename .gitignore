@@ -4,3 +4,6 @@
 /out
 *.log
 *.txt
+/difftest_results
+/test_functions
+/test_composed

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "rustlego-pipeline")]
-#[command(about = "Run the complete fuzzing pipeline: generate → compose → test")]
+#[command(about = "Run the complete generation pipeline: generate → compose")]
 struct PipelineArgs {
     /// Output directory for all results
     #[arg(short = 'o', long, default_value = "pipeline_output")]
@@ -32,10 +32,6 @@ struct PipelineArgs {
     #[arg(short, long, default_value = "1")]
     iterations: usize,
     
-    /// Backends to test (comma-separated)
-    #[arg(short, long, default_value = "llvm,cranelift")]
-    backends: String,
-    
     /// Show detailed statistics
     #[arg(long)]
     detailed_stats: bool,
@@ -45,38 +41,27 @@ struct PipelineArgs {
 async fn main() -> Result<()> {
     let args = PipelineArgs::parse();
     
-    println!("🚀 RustLego Fuzzing Pipeline");
-    println!("============================");
+    println!("🚀 RustLego Generation Pipeline");
+    println!("==============================");
     println!("Output directory: {}", args.output.display());
     println!("Functions per batch: {}", args.functions_per_batch);
     println!("Programs per batch: {}", args.programs_per_batch);
     println!("Max complexity: {}", args.max_complexity);
     println!("Categories: {}", args.categories);
     println!("Iterations: {}", args.iterations);
-    println!("Backends: {}", args.backends);
     
     // Parse configuration
     let categories: Vec<String> = args.categories.split(',').map(|s| s.trim().to_string()).collect();
-    let backends: Vec<String> = args.backends.split(',').map(|s| s.trim().to_string()).collect();
-    
-    let difftest_config = rustlego::difftest::runner::DiffTestConfig {
-        backends,
-        optimization_levels: vec!["0".to_string(), "1".to_string(), "2".to_string(), "3".to_string()],
-        timeout_seconds: 30,
-        output_dir: args.output.join("difftest"),
-    };
-    
     let fuzzing_config = FuzzingConfig {
         functions_per_batch: args.functions_per_batch,
         programs_per_batch: args.programs_per_batch,
         categories,
         max_function_complexity: args.max_complexity,
         output_dir: args.output.clone(),
-        difftest_config,
     };
     
     // Create pipeline
-    let pipeline = FuzzingPipeline::new(fuzzing_config.difftest_config.clone())?;
+    let pipeline = FuzzingPipeline::new()?;
     
     // Run fuzzing
     let sessions = if args.iterations == 1 {

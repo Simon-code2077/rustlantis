@@ -2,7 +2,7 @@
 name = "rustlego"
 version = "0.1.0"
 edition = "2021"
-description = "LegoFuzz-inspired Rust code generation with LLM templates and Rustlantis differential testing"
+description = "LegoFuzz-inspired Rust code generation with LLM templates"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
@@ -24,10 +24,6 @@ path = "src/bin/generate.rs"
 [[bin]]
 name = "compose"
 path = "src/bin/compose.rs"
-
-[[bin]]
-name = "difftest"
-path = "src/bin/difftest.rs"
 
 [[bin]]
 name = "pipeline"

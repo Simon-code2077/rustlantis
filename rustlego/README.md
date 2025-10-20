@@ -1,14 +1,13 @@
 # RustLego
 
-RustLego is an innovative fuzzing tool that combines LegoFuzz-inspired template methodology with LLM-powered code generation and Rustlantis differential testing to discover bugs in the Rust compiler.
+RustLego is an innovative Rust code generation tool that combines LegoFuzz-inspired template methodology with LLM-powered code generation, focused on producing Rust code for differential testing.
 
 ## Overview
 
-This project integrates three powerful approaches:
+This project integrates two powerful approaches:
 
 1. **Template-based Generation**: Uses LegoFuzz methodology to decompose complex functions into basic building blocks
 2. **LLM-powered Code Generation**: Leverages large language models to generate diverse Rust functions from templates
-3. **Differential Testing**: Uses Rustlantis-style testing across multiple backends (LLVM, Cranelift) and optimization levels
 
 ## Architecture
 
@@ -21,8 +20,8 @@ This project integrates three powerful approaches:
                                                          │
                                                          ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Bug Reports    │◀───│  Differential    │◀───│  Program        │
-│  & Statistics   │    │  Testing         │    │  Composer       │
+│  Generated      │    │  Original        │◀───│  Program        │
+│  Rust Files     │    │  difftest Binary │    │  Composer       │
 │                 │    │                  │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
@@ -32,8 +31,8 @@ This project integrates three powerful approaches:
 - **5 Function Categories**: arithmetic, memory, control_flow, type_conversion, string_ops
 - **Template-driven Prompts**: Generate specific, constrained, and adaptive prompts for LLMs
 - **Function Composition**: Combine basic functions into complex programs using both simple combination and chaining strategies
-- **Multi-backend Testing**: Test with LLVM and Cranelift backends across optimization levels 0-3
-- **Statistical Analysis**: Comprehensive fuzzing statistics and recommendations
+- **Decoupled Design**: rustlego focuses on code generation, works with any testing tool
+- **Statistical Analysis**: Comprehensive generation statistics and recommendations
 - **Modular Design**: Each component can be used independently or as part of the full pipeline
 
 ## Installation
@@ -41,7 +40,6 @@ This project integrates three powerful approaches:
 ### Prerequisites
 
 - Rust 1.70+ with `rustc` and `cargo`
-- For Cranelift backend: Install cranelift-codegen backend
 - API access to an LLM service (OpenAI, or local models)
 
 ### Build
@@ -68,7 +66,7 @@ export LLM_MODEL="gpt-4"  # Or your preferred model
 
 ### Command Line Tools
 
-RustLego provides four main executables:
+RustLego provides three main executables:
 
 #### 1. Function Generation
 
@@ -89,44 +87,46 @@ cargo run --bin compose -- --input generated_functions/ --output composed_progra
 cargo run --bin compose -- --input generated_functions/ --output composed_programs/ --chained
 ```
 
-#### 3. Differential Testing
+#### 3. Full Pipeline
 
 ```bash
-# Test composed programs
-cargo run --bin difftest -- --input composed_programs/ --output test_results/ --backends llvm,cranelift
-
-# Custom optimization levels
-cargo run --bin difftest -- --input composed_programs/ --opt-levels 0,2,3 --timeout 60
-```
-
-#### 4. Full Pipeline
-
-```bash
-# Run complete fuzzing pipeline
-cargo run --bin pipeline -- --output pipeline_results/ --iterations 5 --functions-per-batch 15 --detailed-stats
+# Run complete generation pipeline
+cargo run --bin pipeline -- --output pipeline_results/ --iterations 5 --functions-per-batch 15
 
 # Quick single iteration
 cargo run --bin pipeline -- --output quick_test/ --functions-per-batch 5 --programs-per-batch 3
 ```
 
+### Integration with Original difftest
+
+After generating code, you can directly use the original difftest binary for testing:
+
+```bash
+# Test single file
+cargo run -p difftest -- composed_programs/001_combined_3_functions.rs
+
+# Batch test all files in directory
+for file in composed_programs/*.rs; do
+    echo "Testing $file"
+    cargo run -p difftest -- "$file"
+done
+```
+
 ### Library Usage
 
 ```rust
+use rustlego::composer::Composer;
 use rustlego::fuzzer::pipeline::{FuzzingPipeline, FuzzingConfig};
-use rustlego::difftest::runner::DiffTestRunner;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Create fuzzing pipeline
-    let config = FuzzingPipeline::default_config();
-    let pipeline = FuzzingPipeline::new(config.difftest_config.clone())?;
+    // Create function composer
+    let composer = Composer::new();
     
-    // Run fuzzing session
-    let session = pipeline.run_fuzzing_session(config).await?;
+    // Compose programs from existing functions
+    let programs = composer.compose_from_directory("test_functions", 5, 3)?;
     
-    println!("Generated {} functions, found {} bugs", 
-             session.generated_functions.len(), 
-             session.bugs_found);
+    println!("Generated {} programs", programs.len());
     
     Ok(())
 }
@@ -161,36 +161,6 @@ RustLego uses a comprehensive template system with 5 categories:
 - Unicode handling and validation
 - Parsing and serialization
 
-## Differential Testing
-
-The tool tests programs across:
-
-- **Backends**: LLVM (default), Cranelift
-- **Optimization Levels**: 0, 1, 2, 3
-- **Discrepancy Detection**: Exit codes, stdout/stderr differences, compilation failures
-
-### Example Bug Report
-
-```json
-{
-  "program_name": "combined_3_functions",
-  "discrepancies": [
-    {
-      "backend1": "llvm",
-      "backend2": "cranelift", 
-      "optimization1": "2",
-      "optimization2": "2",
-      "discrepancy_type": "ExitCode",
-      "details": "Exit codes differ: 0 vs 1"
-    }
-  ],
-  "summary": {
-    "total_tests": 8,
-    "discrepancies_found": 1
-  }
-}
-```
-
 ## Configuration
 
 ### LLM Configuration
@@ -211,7 +181,7 @@ export LLM_API_KEY="your-key"
 export LLM_MODEL="claude-3-sonnet"
 ```
 
-### Fuzzing Configuration
+### Generation Configuration
 
 ```rust
 FuzzingConfig {
@@ -223,12 +193,6 @@ FuzzingConfig {
     ],
     max_function_complexity: 5,     // Maximum complexity score
     output_dir: PathBuf::from("results/"),
-    difftest_config: DiffTestConfig {
-        backends: vec!["llvm".to_string(), "cranelift".to_string()],
-        optimization_levels: vec!["0".to_string(), "3".to_string()],
-        timeout_seconds: 30,
-        output_dir: PathBuf::from("difftest/"),
-    },
 }
 ```
 
@@ -244,10 +208,6 @@ pipeline_output/
 │   ├── 001_combined_3_functions.rs
 │   ├── 002_chained_4_functions.rs
 │   └── ...
-├── difftest/                     # Test results
-│   ├── program1_report.json
-│   ├── program2_report.json
-│   └── ...
 ├── session_summary.json          # Overall session statistics
 └── final_statistics.json         # Aggregated statistics
 ```
@@ -257,10 +217,15 @@ pipeline_output/
 RustLego provides comprehensive statistics:
 
 - **Function Generation**: Success rates by category
-- **Bug Detection**: Discrepancy types and frequency
-- **Backend Analysis**: Which backend pairs find most bugs
-- **Complexity Analysis**: Relationship between complexity and bug detection
-- **Recommendations**: Actionable insights for improving fuzzing effectiveness
+- **Complexity Analysis**: Relationship between complexity and quality
+- **Recommendations**: Actionable insights for improving generation effectiveness
+
+## Advantages
+
+1. **Decoupled Design**: rustlego focuses on code generation, testing tools focus on testing
+2. **Simplified Dependencies**: Reduced complex dependencies and coupling
+3. **Flexibility**: Can use rustlego standalone for code generation, then test with any tool
+4. **Compatibility**: Generated files are fully compatible with original difftest and other Rust tools
 
 ## Contributing
 
