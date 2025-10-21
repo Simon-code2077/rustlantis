@@ -57,6 +57,7 @@ class FunctionCombiner:
             self.validator = None
         
         # 类型兼容性规则
+        
         self.type_compatibility = {
             "i32": ["i64", "f32", "f64"],
             "i64": ["i32", "f64"], 
