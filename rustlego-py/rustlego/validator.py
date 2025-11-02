@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import json
 import time
+import os
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ class ValidationResult:
     error_message: Optional[str] = None
     warnings: List[str] = None
     validation_time_ms: float = 0.0
+    miri_success: Optional[bool] = None
+    miri_error_message: Optional[str] = None
     
     def __post_init__(self):
         if self.warnings is None:
@@ -58,16 +61,19 @@ class RustValidator:
     
     def __init__(self, 
                  validate_with_warnings: bool = False,
-                 timeout_seconds: int = 30):
+                 timeout_seconds: int = 30,
+                 use_miri: bool = False):
         """
         初始化验证器
         
         Args:
             validate_with_warnings: 是否将有警告的代码视为无效
             timeout_seconds: 编译超时时间
+            use_miri: 是否运行 miri 来检查未定义行为
         """
         self.validate_with_warnings = validate_with_warnings
         self.timeout_seconds = timeout_seconds
+        self.use_miri = use_miri
         
     def validate_function(self, function_code: str) -> ValidationResult:
         """
@@ -117,6 +123,15 @@ class RustValidator:
                 
                 # 运行cargo check
                 result = self._run_cargo_check(project_dir)
+                
+                # 如果启用了 miri 且 cargo check 通过，运行 miri check
+                if self.use_miri and result.compilation_success:
+                    miri_result = self._run_miri_check(project_dir)
+                    result.miri_success = miri_result['success']
+                    result.miri_error_message = miri_result['error_message']
+                    # 如果 miri 发现问题，标记为无效
+                    if not miri_result['success']:
+                        result.is_valid = False
                 
                 validation_time = (time.time() - start_time) * 1000
                 result.validation_time_ms = validation_time
@@ -257,6 +272,56 @@ edition = "2021"
                 error_message=f"编译过程出错: {str(e)}"
             )
     
+    def _run_miri_check(self, project_dir: Path) -> Dict:
+        """运行 miri check 来检测未定义行为"""
+        try:
+            result = subprocess.run(
+                ["cargo", "+nightly", "miri", "run"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                env={**os.environ, "MIRIFLAGS": "-Zmiri-strict-provenance"}
+            )
+            
+            success = result.returncode == 0
+            error_message = None
+            
+            if not success:
+                error_message = self._parse_miri_error(result.stdout, result.stderr)
+            
+            return {
+                'success': success,
+                'error_message': error_message
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'error_message': "Miri 检查超时"
+            }
+        except FileNotFoundError:
+            return {
+                'success': False,
+                'error_message': "未找到 Miri，请运行: rustup +nightly component add miri"
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error_message': f"Miri 检查出错: {str(e)}"
+            }
+    
+    def _parse_miri_error(self, stdout: str, stderr: str) -> str:
+        """解析 miri 错误信息"""
+        # 优先使用 stderr
+        if stderr.strip():
+            return stderr
+        
+        if stdout.strip():
+            return stdout
+        
+        return "未知 Miri 错误"
+    
     def _parse_compilation_error(self, stdout: str, stderr: str) -> str:
         """解析编译错误"""
         # 尝试从JSON输出中提取错误信息
@@ -341,7 +406,7 @@ edition = "2021"
 
 if __name__ == "__main__":
     # 简单测试
-    validator = RustValidator()
+    validator = RustValidator(use_miri=False)
     
     # 测试有效函数
     valid_function = '''
@@ -365,3 +430,13 @@ fn invalid_function(a: i32) -> i32 {
     result2 = validator.validate_function(invalid_function)
     console.print(f"结果: {'✅ 有效' if result2.is_valid else '❌ 无效'}")
     console.print(f"错误信息: {result2.error_message}")
+    
+    # 测试 Miri 检查（需要 nightly 工具链）
+    console.print("[bold blue]测试 Miri 检查:[/bold blue]")
+    validator_with_miri = RustValidator(use_miri=True)
+    result3 = validator_with_miri.validate_function(valid_function)
+    console.print(f"Cargo Check 结果: {'✅' if result3.compilation_success else '❌'}")
+    if result3.miri_success is not None:
+        console.print(f"Miri 检查结果: {'✅' if result3.miri_success else '❌'}")
+        if result3.miri_error_message:
+            console.print(f"Miri 错误: {result3.miri_error_message}")

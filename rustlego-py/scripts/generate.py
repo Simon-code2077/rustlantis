@@ -22,7 +22,7 @@ console = Console()
               help='函数类别 (arithmetic, memory, control_flow, type_conversion, string_ops)')
 @click.option('--count', '-n', default=5, 
               help='生成函数数量')
-@click.option('--output', '-o', default='generated',
+@click.option('--output', '-o', default='examples/generated',
               help='输出目录')
 @click.option('--validate/--no-validate', default=True,
               help='是否启用编译验证')
@@ -84,11 +84,6 @@ def generate(category, count, output, validate, stats, output_format):
                     success_rate = valid_count / len(functions) if functions else 0
                     console.print(f"验证成功率: {success_rate:.1%}")
                     
-                    if success_rate < 0.8:
-                        console.print("\n[yellow]⚠️ 警告: 成功率较低，建议:[/yellow]")
-                        console.print("   - 调整模板参数")
-                        console.print("   - 使用不同的LLM参数")
-                        console.print("   - 检查函数类别复杂度")
             
             return True
             

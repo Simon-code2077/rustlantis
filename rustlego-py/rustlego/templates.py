@@ -192,6 +192,8 @@ class PromptGenerator:
 4. 确保函数能够编译且安全
 5. 为复杂逻辑添加内联注释
 6. 使用适当的Rust类型和模式
+7. 如果返回类型是Result<T, E>，确保正确处理Ok/Err分支
+8. 不要在函数中重复定义同名函数
 
 请生成完整的函数实现:"""
     
@@ -204,6 +206,49 @@ class PromptGenerator:
             additional_constraints += f"{i}. {constraint}\n"
         
         return basic_prompt + additional_constraints
+    
+    def generate_chaining_prompt(self, prev_return_type: str, next_param_types: List[str]) -> str:
+        """生成用于链式调用的prompt
+        
+        确保生成的代码能够正确处理Result类型的转换
+        
+        Args:
+            prev_return_type: 前一个函数的返回类型
+            next_param_types: 下一个函数的参数类型列表
+        """
+        type_handling = self._generate_type_handling_guide(prev_return_type, next_param_types)
+        
+        return f"""当生成能够链式调用的Rust函数时，请遵循以下类型处理规则:
+
+前一个函数返回类型: {prev_return_type}
+下一个函数需要的参数类型: {', '.join(next_param_types)}
+
+{type_handling}
+
+重要提示:
+1. 如果前一个函数返回 Result<T, E>，在传递给下一个函数前必须解包
+2. 在实际的main函数中，使用match表达式处理Result类型
+3. 不要生成无法编译的代码
+4. 确保类型之间的兼容性"""
+    
+    def _generate_type_handling_guide(self, return_type: str, param_types: List[str]) -> str:
+        """生成类型处理指南"""
+        guide = "类型处理指南:\n"
+        
+        if "Result<" in return_type:
+            inner_type = return_type.split("Result<")[1].split(",")[0]
+            guide += f"✓ 返回类型 {return_type} 应该通过match解包以获得 {inner_type}\n"
+            
+            for param_type in param_types:
+                if param_type == inner_type:
+                    guide += f"✓ {inner_type} 可以直接用作下一个函数的参数\n"
+                elif "i32" in param_type and "i32" in inner_type:
+                    guide += f"✓ {inner_type} 与 {param_type} 兼容\n"
+        elif "Option<" in return_type:
+            inner_type = return_type.split("Option<")[1].rstrip(">")
+            guide += f"✓ 返回类型 {return_type} 应该通过match/unwrap_or解包以获得 {inner_type}\n"
+        
+        return guide
 
 
 if __name__ == "__main__":

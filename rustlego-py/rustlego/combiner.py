@@ -228,35 +228,143 @@ class FunctionCombiner:
         return "\n".join(main_body)
     
     def _create_chained_main(self, functions: List[GeneratedFunction]) -> str:
-        """创建智能链式主函数"""
+        """创建智能链式主函数，正确处理Result类型的转换"""
         main_body = []
         main_body.append("fn main() {")
         main_body.append('    println!("Running chained functions:");')
         main_body.append("")
         
-        # 生成实际的函数调用链
+        # 简化策略：收集所有步骤和类型信息
+        steps = []
         for i, func in enumerate(functions):
             func_name = self._extract_function_name(func.code)
             sig = self._extract_function_signature(func.code)
-            
-            main_body.append(f"    // Step {i+1}: {func_name}")
-            
-            if i == 0:
-                # 第一个函数：生成适当的初始值
-                call_str = self._generate_function_call(func_name, sig, None)
-                main_body.append(f"    let result_{i} = {call_str};")
-            else:
-                # 后续函数：使用前一个函数的结果
-                call_str = self._generate_function_call(func_name, sig, f"result_{i-1}")
-                main_body.append(f"    let result_{i} = {call_str};")
-            
-            main_body.append(f'    println!("Result {i+1}: {{:?}}", result_{i});')
-            main_body.append("")
+            steps.append({
+                'index': i,
+                'name': func_name,
+                'sig': sig,
+                'return_type': sig['return_type'],
+                'params': sig['params']
+            })
         
+        # 生成链式调用代码
+        self._generate_chain_code(main_body, steps, 0, None)
+        
+        main_body.append("")
         main_body.append('    println!("Chain execution completed.");')
         main_body.append("}")
         
         return "\n".join(main_body)
+    
+    def _generate_chain_code(self, main_body: List[str], steps: List[Dict], 
+                           step_idx: int, prev_var: Optional[str], indent_level: int = 1):
+        """递归生成链式调用代码"""
+        if step_idx >= len(steps):
+            return
+        
+        indent = "    " * indent_level
+        step = steps[step_idx]
+        func_name = step['name']
+        sig = step['sig']
+        
+        main_body.append(f"{indent}// Step {step_idx + 1}: {func_name}")
+        
+        # 生成函数调用
+        if step_idx == 0:
+            call_str = self._generate_function_call(func_name, sig, None)
+        else:
+            # 使用前一个结果
+            call_str = self._generate_chained_function_call(
+                func_name, sig, prev_var, 
+                self._extract_result_inner_type(steps[step_idx - 1]['return_type'])
+            )
+        
+        main_body.append(f"{indent}let result_{step_idx} = {call_str};")
+        
+        return_type = step['return_type']
+        
+        # 检查返回类型
+        if 'Result<' in return_type:
+            main_body.append(f"{indent}match result_{step_idx} {{")
+            main_body.append(f"{indent}    Ok(value_{step_idx}) => {{")
+            main_body.append(f'{indent}        println!("Result {step_idx + 1}: {{:?}}", result_{step_idx});')
+            
+            # 递归处理下一步
+            if step_idx < len(steps) - 1:
+                self._generate_chain_code(main_body, steps, step_idx + 1, 
+                                        f"value_{step_idx}", indent_level + 2)
+            
+            main_body.append(f"{indent}    }}")
+            main_body.append(f"{indent}    Err(e) => {{")
+            main_body.append(f'{indent}        println!("Error in step {step_idx + 1}: {{}}", e);')
+            main_body.append(f"{indent}    }}")
+            main_body.append(f"{indent}}}")
+        elif 'Option<' in return_type:
+            # 处理 Option 类型
+            main_body.append(f"{indent}match result_{step_idx} {{")
+            main_body.append(f"{indent}    Some(value_{step_idx}) => {{")
+            main_body.append(f'{indent}        println!("Result {step_idx + 1}: {{:?}}", result_{step_idx});')
+            
+            if step_idx < len(steps) - 1:
+                self._generate_chain_code(main_body, steps, step_idx + 1,
+                                        f"value_{step_idx}", indent_level + 2)
+            
+            main_body.append(f"{indent}    }}")
+            main_body.append(f"{indent}    None => {{")
+            main_body.append(f'{indent}        println!("Result {step_idx + 1}: None");')
+            main_body.append(f"{indent}    }}")
+            main_body.append(f"{indent}}}")
+        else:
+            # 普通类型，直接使用
+            main_body.append(f'{indent}println!("Result {step_idx + 1}: {{:?}}", result_{step_idx});')
+            
+            if step_idx < len(steps) - 1:
+                self._generate_chain_code(main_body, steps, step_idx + 1,
+                                        f"result_{step_idx}", indent_level)
+    
+    def _extract_result_inner_type(self, result_type: str) -> str:
+        """从Result<T, E>中提取T"""
+        match = re.search(r'Result<([^,]+),', result_type)
+        if match:
+            return match.group(1).strip()
+        return "i32"  # 默认类型
+    
+    def _generate_chained_function_call(self, func_name: str, signature: Dict, 
+                                       prev_var: str, prev_type: str) -> str:
+        """生成链式调用，正确处理类型转换"""
+        params = signature.get('params', [])
+        
+        if not params:
+            return f"{func_name}()"
+        
+        call_params = []
+        
+        for i, param_type in enumerate(params):
+            if i == 0:
+                # 第一个参数使用前一个结果
+                # 检查是否需要类型转换
+                param_normalized = self._normalize_type(param_type)
+                prev_normalized = self._normalize_type(prev_type)
+                
+                if param_normalized == prev_normalized:
+                    call_params.append(prev_var)
+                else:
+                    # 需要类型转换，使用 as 或其他方式
+                    if self._is_numeric_type(param_normalized) and self._is_numeric_type(prev_normalized):
+                        call_params.append(f"{prev_var} as {param_normalized}")
+                    else:
+                        call_params.append(prev_var)
+            else:
+                # 其他参数生成默认值
+                default_val = self._generate_default_value(param_type)
+                call_params.append(default_val)
+        
+        return f"{func_name}({', '.join(call_params)})"
+    
+    def _is_numeric_type(self, type_str: str) -> bool:
+        """检查是否是数值类型"""
+        numeric_types = {'i8', 'i16', 'i32', 'i64', 'isize', 'u8', 'u16', 'u32', 'u64', 'usize', 'f32', 'f64'}
+        return type_str in numeric_types
     
     def _generate_function_call(self, func_name: str, signature: Dict, prev_result: Optional[str]) -> str:
         """生成智能的函数调用"""

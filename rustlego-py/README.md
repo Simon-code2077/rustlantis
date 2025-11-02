@@ -65,41 +65,120 @@ rustlego-py/
 
 ## 🚀 快速开始
 
+### 🎯 一键安装 (推荐新用户)
+```bash
+# 下载项目并运行安装脚本
+git clone <repository-url>
+cd rustlego-py
+./install.sh
+
+# 或手动安装 (见下方)
+```
+
 ### 1. 环境设置
 ```bash
 # 确保已安装 Rust 和 Cargo
 rustc --version
 cargo --version
 
+# 创建Python虚拟环境 (推荐)
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 或 venv\Scripts\activate  # Windows
+
 # 安装 Python 依赖
 pip install -r requirements.txt
+
+# 安装 LLM 客户端依赖（选择一个）
+pip install openai          # OpenAI GPT
+pip install anthropic       # Claude
+pip install aiohttp         # 本地LLM (如Ollama)
 ```
 
-### 2. 基础功能体验
+### 2. 🔑 LLM配置 (必需)
+
+**重要**: 系统需要真实的LLM服务才能工作，现在配置更加简单！
+
+#### 🎯 简化配置 (推荐方式)
+
+1. **创建配置文件**:
 ```bash
-# 生成简单函数
+# 运行配置工具，自动创建 llm_config.json
+python simple_config.py
+```
+
+2. **编辑配置文件**:
+```json
+{
+  "llm_type": "qwen",
+  "model": "qwen-coder-turbo",
+  "api_key": null,
+  "base_url": "https://dashscope.aliyuncs.com/api/v1",
+  "temperature": 0.1,
+  "max_tokens": 2000,
+  "top_p": 0.8
+}
+```
+
+3. **支持的配置示例**:
+
+**通义千问 (Qwen)**:
+```json
+{
+  "llm_type": "qwen",
+  "model": "qwen-coder-turbo",
+  "api_key": "your-dashscope-api-key",
+  "base_url": "https://dashscope.aliyuncs.com/api/v1",
+  "temperature": 0.1,
+  "max_tokens": 2000
+}
+```
+
+**OpenAI**:
+```json
+{
+  "llm_type": "openai", 
+  "model": "gpt-3.5-turbo",
+  "api_key": "your-openai-api-key",
+  "temperature": 0.2,
+  "max_tokens": 2000
+}
+```
+
+**本地模型 (Ollama)**:
+```json
+{
+  "llm_type": "local",
+  "model": "codellama:7b", 
+  "base_url": "http://localhost:11434",
+  "temperature": 0.2,
+  "num_predict": 1000
+}
+```
+
+#### 🏃‍♂️ 快速验证
+```bash
+# 验证配置是否正确
+python simple_config.py
+
+# 或直接测试生成器
+python rustlego/generator.py
+```
+
+
+
+### 3. 基础功能体验
+```bash
+# 生成简单函数 (需要先配置LLM)
 python3 scripts/generate.py --category arithmetic --count 5 --validate
 
 # 基础函数组合
 python3 scripts/compose.py --input examples/generated/ --output examples/composed/
 ```
 
-### 3. 🔥 高级功能演示
-```bash
-# 智能函数链匹配演示
-python3 test_advanced_chaining.py
 
-# 完整工作链演示  
-python3 working_demo.py
 
-# 高级功能全面展示
-python3 advanced_demo.py
-
-# 性能基准测试
-python3 performance_test.py
-```
-
-### 4. 编译运行生成的程序
+### 3. 编译运行生成的程序
 ```bash
 # 编译并运行完整示例
 cd examples/working
@@ -107,107 +186,3 @@ rustc complete_chain.rs -o complete_chain
 ./complete_chain
 ```
 
-## 🎯 核心使用场景
-
-### 场景1: 智能函数链构建
-```python
-from rustlego.combiner import FunctionCombiner
-from rustlego.generator import GeneratedFunction
-
-# 创建高级组合器
-combiner = FunctionCombiner(enable_validation=True)
-
-# 创建复杂函数集
-functions = [...]  # 包含复杂类型的函数
-
-# 智能链式组合
-program = combiner.create_chained_composition(functions)
-
-# 生成可编译的完整程序
-if program.is_valid():
-    print(f"成功构建 {len(program.functions)} 个函数的调用链")
-    print(f"类型覆盖率: {program.type_diversity}")
-    print(f"总复杂度: {program.complexity}")
-```
-
-### 场景2: 大规模函数处理
-```python
-# 高性能处理大量函数
-large_function_set = generate_functions(count=100)
-chain = combiner._find_compatible_chain(signatures)  # 3ms内完成
-
-# 自动选择最佳策略
-# - 小规模: 图搜索算法，高质量结果
-# - 大规模: 贪心算法，快速响应
-```
-
-### 场景3: 复杂类型处理
-```python
-# 支持的复杂类型示例
-complex_functions = [
-    "fn process() -> Result<Vec<Option<i32>>, String>",
-    "fn handle(res: Result<Vec<Option<i32>>, String>) -> bool",
-    "fn convert(b: bool) -> Option<f64>"
-]
-
-# 系统自动处理类型转换和兼容性
-```
-
-## 🏆 技术优势对比
-
-| 特性 | 基础版本 | 高级版本 | 提升 |
-|------|----------|----------|------|
-| 类型处理 | 简单类型 | 复杂泛型/错误类型 | 10x |
-| 组合策略 | 随机组合 | 3种智能策略 | 智能化 |
-| 性能规模 | <10个函数 | 100+个函数 | 10x+ |
-| 代码质量 | 基础验证 | 完整可运行程序 | 生产级 |
-| 搜索算法 | 暴力搜索 | 图算法+贪心优化 | 1000x |
-| 错误处理 | 基础报错 | 智能类型转换 | 专业级 |
-
-## 🧪 测试验证
-
-### 自动化测试套件
-```bash
-# 完整测试套件
-python3 -m pytest tests/ -v
-
-# 高级功能测试
-python3 test_advanced_chaining.py
-
-# 性能基准测试
-python3 performance_test.py
-```
-
-### 示例验证结果
-```
-✅ 基本链式组合: 6/10 函数 (60% 覆盖率)
-✅ 复杂类型链式: 16/25 函数 (64% 覆盖率)  
-✅ 大规模处理: 48/100 函数 (48% 覆盖率)
-✅ 所有生成程序编译通过
-✅ 运行时验证 100% 成功
-```
-
-## 📖 深入了解
-
-- 📚 [高级功能详细文档](ADVANCED_FEATURES.md)
-- 🔬 [算法实现原理](rustlego/combiner.py)
-- 🎯 [完整示例代码](examples/)
-- ⚡ [性能优化技巧](performance_test.py)
-
-## 🤝 贡献指南
-
-1. **算法改进**: 在 `combiner.py` 中实现新的搜索策略
-2. **类型支持**: 扩展 `_normalize_type()` 方法支持更多Rust类型
-3. **性能优化**: 优化大规模函数集的处理效率
-4. **测试用例**: 添加复杂类型的测试场景
-
-## 🔮 未来发展
-
-- 🧠 **AI增强**: 集成更强大的代码理解模型
-- 🌐 **语言扩展**: 支持其他系统编程语言
-- 🔧 **工具集成**: VS Code 插件和 CI/CD 集成
-- 📊 **智能分析**: 代码质量和性能预测
-
----
-
-**RustLego-Py** - 让Rust代码生成变得智能而高效！ 🦀✨

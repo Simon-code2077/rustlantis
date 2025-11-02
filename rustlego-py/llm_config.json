@@ -1,0 +1,7 @@
+{
+  "llm_type": "qwen",
+  "model": "qwen-coder-turbo",
+  "api_key": "sk-1150c659956b4dd7a71ed6b3f05e0c35",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "temperature": 0.1
+}

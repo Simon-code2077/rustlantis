@@ -8,6 +8,8 @@
 import re
 import time
 import json
+import os
+import random
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, asdict
@@ -17,6 +19,7 @@ from rich.progress import Progress, TaskID
 try:
     from .validator import RustValidator, ValidationResult
     from .templates import TemplateLibrary, FunctionTemplate, PromptGenerator
+    from .llm_clients import LLMClient, create_llm_client
 except ImportError:
     # 处理直接运行时的导入
     import sys
@@ -24,6 +27,7 @@ except ImportError:
     sys.path.append(str(Path(__file__).parent.parent))
     from rustlego.validator import RustValidator, ValidationResult
     from rustlego.templates import TemplateLibrary, FunctionTemplate, PromptGenerator
+    from rustlego.llm_clients import LLMClient, create_llm_client
 
 console = Console()
 
@@ -51,133 +55,33 @@ class GeneratedFunction:
             return True  # 如果没有验证，认为有效
         return self.validation_result.is_valid
 
-class MockLLMClient:
-    """模拟LLM客户端（用于演示）"""
-    
-    def __init__(self):
-        # 预定义的一些示例函数，用于演示
-        self.example_functions = {
-            "add_numbers": """fn add_numbers(a: i32, b: i32) -> Result<i32, String> {
-    match a.checked_add(b) {
-        Some(result) => Ok(result),
-        None => Err("Integer overflow occurred".to_string()),
-    }
-}""",
-            "multiply_safe": """fn multiply_safe(a: i32, b: i32) -> Option<i32> {
-    if a == 0 || b == 0 {
-        return Some(0);
-    }
-    a.checked_mul(b)
-}""",
-            "divide_checked": """fn divide_checked(a: i32, b: i32) -> Result<i32, &'static str> {
-    if b == 0 {
-        Err("Division by zero")
-    } else {
-        Ok(a / b)
-    }
-}""",
-            "process_slice": """fn process_slice(data: &mut [u8], start: usize, end: usize) -> bool {
-    if start >= end || end > data.len() {
-        return false;
-    }
-    
-    for i in start..end {
-        data[i] = data[i].wrapping_add(1);
-    }
-    
-    true
-}""",
-            "safe_index": """fn safe_index<T>(slice: &[T], index: usize) -> Option<&T> {
-    if index < slice.len() {
-        Some(&slice[index])
-    } else {
-        None
-    }
-}""",
-            "conditional_process": """fn conditional_process(input: Option<i32>) -> Result<String, &'static str> {
-    match input {
-        Some(value) if value > 0 => Ok(format!("Positive: {}", value)),
-        Some(value) if value < 0 => Ok(format!("Negative: {}", value)),
-        Some(0) => Ok("Zero".to_string()),
-        None => Err("No input provided"),
-    }
-}""",
-            "safe_convert": """fn safe_convert(input: f64) -> Result<i32, String> {
-    if input.is_nan() || input.is_infinite() {
-        return Err("Invalid floating point value".to_string());
-    }
-    
-    if input > i32::MAX as f64 || input < i32::MIN as f64 {
-        return Err("Value out of i32 range".to_string());
-    }
-    
-    Ok(input as i32)
-}""",
-            "format_and_validate": """fn format_and_validate(template: &str, args: &[String]) -> Result<String, &'static str> {
-    if template.is_empty() {
-        return Err("Template cannot be empty");
-    }
-    
-    let placeholder_count = template.matches("{}").count();
-    if placeholder_count != args.len() {
-        return Err("Argument count mismatch");
-    }
-    
-    let mut result = template.to_string();
-    for arg in args {
-        if let Some(pos) = result.find("{}") {
-            result.replace_range(pos..pos+2, arg);
-        }
-    }
-    
-    Ok(result)
-}"""
-        }
-    
-    async def generate(self, prompt: str) -> str:
-        """生成函数代码"""
-        # 模拟生成延迟
-        await self._simulate_delay()
-        
-        # 从prompt中提取函数名
-        function_name = self._extract_function_name_from_prompt(prompt)
-        
-        # 返回对应的示例函数，或生成一个简单的函数
-        if function_name in self.example_functions:
-            return f"```rust\n{self.example_functions[function_name]}\n```"
-        else:
-            # 生成一个简单的默认函数
-            return f"""```rust
-fn {function_name}(x: i32) -> i32 {{
-    x + 1
-}}
-```"""
-    
-    async def _simulate_delay(self):
-        """模拟网络延迟"""
-        import asyncio
-        await asyncio.sleep(0.1)  # 100ms延迟
-    
-    def _extract_function_name_from_prompt(self, prompt: str) -> str:
-        """从prompt中提取函数名"""
-        # 查找"函数名称:"后的内容
-        match = re.search(r'函数名称:\s*(\w+)', prompt)
-        if match:
-            return match.group(1)
-        return "generated_function"
-
 class FunctionGenerator:
     """函数生成器"""
     
     def __init__(self, 
                  enable_validation: bool = True,
-                 llm_client: Optional[Any] = None):
+                 config_file: Optional[str] = None,
+                 llm_client: Optional[LLMClient] = None):
         """
         初始化函数生成器
         
         Args:
             enable_validation: 是否启用验证
-            llm_client: LLM客户端（如果为None则使用模拟客户端）
+            config_file: LLM配置文件路径，默认为 "llm_config.json"
+            llm_client: 直接提供的LLM客户端实例（用于高级用法）
+            
+        Examples:
+            # 使用默认配置文件
+            generator = FunctionGenerator()
+            
+            # 使用指定配置文件
+            generator = FunctionGenerator(config_file="custom_config.json")
+            
+            # 直接传入客户端（高级用法）
+            generator = FunctionGenerator(llm_client=my_client)
+            
+        Raises:
+            ValueError: 当配置文件不存在或格式错误时
         """
         self.template_library = TemplateLibrary()
         self.prompt_generator = PromptGenerator()
@@ -187,9 +91,52 @@ class FunctionGenerator:
             self.validator = RustValidator()
         else:
             self.validator = None
+        
+        # 配置LLM客户端
+        if llm_client:
+            # 直接使用提供的客户端
+            self.llm_client = llm_client
+        else:
+            # 从配置文件加载
+            if config_file is None:
+                # 默认配置文件路径
+                config_file = os.path.join(os.path.dirname(__file__), '..', 'llm_config.json')
             
-        # 使用提供的LLM客户端或模拟客户端
-        self.llm_client = llm_client or MockLLMClient()
+            if not os.path.exists(config_file):
+                raise ValueError(
+                    f"配置文件不存在: {config_file}\n\n"     
+                )
+            
+            try:
+                # 读取配置文件
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                
+                console.print(f"[green]从配置文件加载LLM配置: {config_file}[/green]")
+                console.print(f"[blue]LLM类型: {config_data.get('llm_type')}, 模型: {config_data.get('model')}[/blue]")
+                
+                # 提取基本参数
+                llm_type = config_data.pop('llm_type')
+                model = config_data.pop('model', None)
+                api_key = config_data.pop('api_key', None)
+                base_url = config_data.pop('base_url', None)
+                
+                # 其余参数作为模型参数
+                model_params = config_data
+                
+                # 创建LLM客户端
+                self.llm_client = create_llm_client(
+                    llm_type=llm_type,
+                    model=model,
+                    api_key=api_key,
+                    base_url=base_url,
+                    **model_params
+                )
+                
+            except json.JSONDecodeError as e:
+                raise ValueError(f"配置文件格式错误: {e}")
+            except Exception as e:
+                raise ValueError(f"加载配置失败: {e}")
     
     async def generate_function(self, template: FunctionTemplate) -> GeneratedFunction:
         """
@@ -221,9 +168,9 @@ class FunctionGenerator:
             validation_result = self.validator.validate_function(function_code)
             
             if validation_result.is_valid:
-                console.print("[green]✅ 有效[/green]")
+                console.print("[green] 有效[/green]")
             else:
-                console.print("[red]❌ 无效[/red]")
+                console.print("[red] 无效[/red]")
         
         return GeneratedFunction(
             name=template.name,
@@ -267,7 +214,7 @@ class FunctionGenerator:
             task = progress.add_task(f"生成 {category} 函数", total=count)
             
             while len(valid_functions) < count and attempts < max_attempts:
-                template = templates[attempts % len(templates)]
+                template = random.choice(templates)
                 attempts += 1
                 
                 try:
@@ -421,23 +368,33 @@ if __name__ == "__main__":
     
     async def test_generator():
         """测试函数生成器"""
-        generator = FunctionGenerator(enable_validation=True)
-        
-        # 测试单个函数生成
-        templates = generator.template_library.get_templates("arithmetic")
-        if templates:
-            func = await generator.generate_function(templates[0])
-            console.print(f"\n[bold green]生成的函数:[/bold green]\n{func.code}")
-            console.print(f"有效性: {'✅' if func.is_valid() else '❌'}")
-        
-        # 测试批量生成
-        console.print("\n[bold blue]测试批量生成:[/bold blue]")
-        functions = await generator.generate_batch("arithmetic", 3)
-        
-        console.print(f"\n生成了 {len(functions)} 个函数:")
-        for func in functions:
-            status = "✅" if func.is_valid() else "❌"
-            console.print(f"  {status} {func.name}")
+        try:
+            console.print("[blue]使用配置文件初始化生成器...[/blue]")
+            generator = FunctionGenerator(enable_validation=True)
+            
+            # 测试单个函数生成
+            templates = generator.template_library.get_templates("arithmetic")
+            if templates:
+                console.print("[cyan]测试单个函数生成...[/cyan]")
+                func = await generator.generate_function(templates[0])
+                console.print(f"\n[bold green]生成的函数:[/bold green]\n{func.code}")
+                console.print(f"有效性: {'✅' if func.is_valid() else '❌'}")
+            
+            # 测试批量生成
+            console.print("\n[bold blue]测试批量生成:[/bold blue]")
+            functions = await generator.generate_batch("arithmetic", 2)
+            
+            console.print(f"\n生成了 {len(functions)} 个函数:")
+            for func in functions:
+                status = "✅" if func.is_valid() else "❌"
+                console.print(f"  {status} {func.name}")
+                
+        except Exception as e:
+            console.print(f"[red]❌ 测试失败: {e}[/red]")
+            console.print("\n请确保:")
+            console.print("1. 配置文件 llm_config.json 存在")
+            console.print("2. 配置文件格式正确")
+            console.print("3. API密钥等信息已正确设置")
     
     # 运行测试
     asyncio.run(test_generator())
