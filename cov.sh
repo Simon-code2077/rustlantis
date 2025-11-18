@@ -2,9 +2,9 @@
 #!/bin/bash
 set -e
 
-RUSTC=/path/to/install/rustc
-SRC_DIR=out
-COV_DIR=coverage
+RUSTC=~/compiler/bin/rustc
+SRC_DIR=/users/hangye/rustc-rug-coverage/synthesized
+COV_DIR=/users/hangye/rustc-rug-coverage/coverage
 rm -rf "$COV_DIR"
 rm -rf cov.info
 mkdir -p "$COV_DIR"
@@ -31,10 +31,10 @@ done
 #     "$RUSTC" -O complex_test.rs -o "complex_test_opt" 
 
 echo "Processing coverage data..."
-grcov coverage/*.profraw   \
-    -s path/to/source/rust-nightly   \
-    -b path/to/install   \
-    --llvm-path path/to/source/rust-nightly/build/x86_64-unknown-linux-gnu/ci-llvm/bin   \
+grcov $COV_DIR/*.profraw   \
+    -s /users/hangye/compiler/rust-nightly   \
+    -b /users/hangye/compiler/bin \
+    --llvm-path ~/compiler/rust-nightly/build/x86_64-unknown-linux-gnu/ci-llvm/bin   \
     --keep-only="compiler/rustc_mi*" \
     -t lcov   -o cov.info
 lcov --summary cov.info
